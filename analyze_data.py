@@ -52,14 +52,16 @@ def plot_histogram_with_peaks(values, threshold=1.2, n_channels=128, mean=None, 
 
 
 
-def detect_failed_channels(values, mean, threshold=0.2):
+def detect_failed_channels(values, mean, expectet_value = 400, threshold=0.2):
     failed = []
+    failed_expected_value = []
     consecutive_groups = []
     counter = 0
+    fails = [False,False]
     threshold = (1+threshold)*mean
     for i, val in enumerate(values):
-        if abs(val) < threshold:
-            failed.append(i)
+        if abs(val) > threshold:
+            failed.append([i+1,val])
             if i - 1 in failed:
                 counter += 1
             else:
@@ -67,10 +69,19 @@ def detect_failed_channels(values, mean, threshold=0.2):
             if counter == 8:
                 consecutive_groups.append(list(range(i - 7, i + 1)))
             elif counter > 8:
-                consecutive_groups[-1].append(i)
+                consecutive_groups[-1].append(i+1)
         else:
             counter = 0
-    return failed, consecutive_groups
+        if abs(val) > expectet_value * 1.5:
+            failed_expected_value.append([i+1,val])
+
+    if len(consecutive_groups) > 0:
+        fails[0] = True
+
+    if len(failed_expected_value) > 0:
+        fails[1] = True 
+
+    return failed, consecutive_groups, failed_expected_value, fails
 
 
 
@@ -183,13 +194,21 @@ def analyze_and_plot(variables, folder_path_up, name, date, folder_path_down = N
                 if plot_hist:
                     plot_histogram_with_peaks(all_channels, threshold, n_channels=np.arange(len(all_channels)),
                                               mean=np.mean(all_channels), y_label=y_label, title = f"{title_short} hist, for {name} on {file_date}")
-                failed, failed_groups = detect_failed_channels(all_channels, mean= mean_val)
+                failed, failed_groups, expected_value, fails = detect_failed_channels(all_channels, mean= mean_val,threshold=0.01)
                 results[var] = {
                     "means": means,
                     "errors": errors,
                     "failed_channels": failed,
-                    "failed_groups": failed_groups
+                    "failed_groups": failed_groups,
+                    "expected_value_fails": expected_value
                 }
+                if fails[0]:
+                    results["result"] = "failed for 8 and more consecutive failed channels"
+                if fails[1]:
+                    results["result"] = "failed for channel noise larger that 1.5 times expected value"
+                if fails[0] and fails[1]:
+                    results["result"] =  "failed for 8 and more consecutive failed channels and for atleast one " \
+                    "channel noise larger that 1.5 times expected value"
             output_file = os.path.join(folder_path_down, f"{var}_mean_fit_error_{name}_{date}.png")
             plot_summary(means, errors, mask, labels, y_label, title, title_short, output_file)
         else:
@@ -254,6 +273,6 @@ if __name__ == "__main__":
         folder_path_down = r"C:/sfg/Code/Graphs",
         name="SN20USEH40000148_H1",
         date="20250702",
-        per_chip=True,
+        per_chip=False,
         plot_hist = False
     )
