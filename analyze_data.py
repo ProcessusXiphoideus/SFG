@@ -52,28 +52,28 @@ def plot_histogram_with_peaks(values, threshold=1.2, n_channels=128, mean=None, 
 
 
 
-def detect_failed_channels(values, mean, expectet_value = 400, threshold=0.2):
+def detect_failed_channels(values, mean, expectet_value = 600, threshold=1.2):
     failed = []
     failed_expected_value = []
     consecutive_groups = []
     counter = 0
     fails = [False,False]
-    threshold = (1+threshold)*mean
+    threshold = (threshold)*mean
     for i, val in enumerate(values):
         if abs(val) > threshold:
-            failed.append([i+1,val])
-            if i - 1 in failed:
+            failed.append(i+1)
+            if i in failed:
                 counter += 1
             else:
                 counter = 1
             if counter == 8:
-                consecutive_groups.append(list(range(i - 7, i + 1)))
+                consecutive_groups.append(list(range(i - 6, i + 2)))
             elif counter > 8:
                 consecutive_groups[-1].append(i+1)
         else:
             counter = 0
         if abs(val) > expectet_value * 1.5:
-            failed_expected_value.append([i+1,val])
+            failed_expected_value.append(i+1)
 
     if len(consecutive_groups) > 0:
         fails[0] = True
@@ -142,7 +142,7 @@ def plot_summary(means, errors, mask, labels, y_label, title, title_short, outpu
 
 
 
-def analyze_and_plot(variables, folder_path_up, name, date, folder_path_down = None, per_chip=False, threshold=1.01, plot_hist = False):
+def analyze_and_plot(variables, folder_path_up, name, date, folder_path_down = None, per_chip=False, threshold=1.2, plot_hist = False):
     if folder_path_down == None:
         folder_path_down = folder_path_up
     data_list = load_json_files(folder_path_up, name, date)
@@ -194,7 +194,7 @@ def analyze_and_plot(variables, folder_path_up, name, date, folder_path_down = N
                 if plot_hist:
                     plot_histogram_with_peaks(all_channels, threshold, n_channels=np.arange(len(all_channels)),
                                               mean=np.mean(all_channels), y_label=y_label, title = f"{title_short} hist, for {name} on {file_date}")
-                failed, failed_groups, expected_value, fails = detect_failed_channels(all_channels, mean= mean_val,threshold=0.01)
+                failed, failed_groups, expected_value, fails = detect_failed_channels(all_channels, mean= mean_val,threshold=0.2)
                 results[var] = {
                     "means": means,
                     "errors": errors,
@@ -202,13 +202,16 @@ def analyze_and_plot(variables, folder_path_up, name, date, folder_path_down = N
                     "failed_groups": failed_groups,
                     "expected_value_fails": expected_value
                 }
-                if fails[0]:
-                    results["result"] = "failed for 8 and more consecutive failed channels"
-                if fails[1]:
-                    results["result"] = "failed for channel noise larger that 1.5 times expected value"
+
                 if fails[0] and fails[1]:
                     results["result"] =  "failed for 8 and more consecutive failed channels and for atleast one " \
                     "channel noise larger that 1.5 times expected value"
+                elif fails[0]:
+                    results["result"] = "failed for 8 and more consecutive failed channels"
+                elif fails[1]:
+                    results["result"] = "failed for channel noise larger that 1.5 times expected value"
+                else:
+                    results["result"] = "Passed"
             output_file = os.path.join(folder_path_down, f"{var}_mean_fit_error_{name}_{date}.png")
             plot_summary(means, errors, mask, labels, y_label, title, title_short, output_file)
         else:
@@ -216,11 +219,12 @@ def analyze_and_plot(variables, folder_path_up, name, date, folder_path_down = N
             all_means = []
             all_errors = []
             labels = [data.get('date') for data in data_list]
-            mask = [(1 if data.get('properties', {}).get("DCS", {}).get("AMAC_NTCx", 0) > 20 else 0) for data in data_list]
+            mask = [(1 if data.get('properties', {}).get("DCS", {}).get("AMAC_NTCx", 0) > 0 else 0) for data in data_list]
             fig1, axs1 = plt.subplots(2, 3, figsize=(15, 8))
             axs1 = axs1.ravel()
             fig2, axs2 = plt.subplots(2, 3, figsize=(18, 8))
             axs2 = axs2.ravel()
+            failed, failed_groups, expected_value, fails = [], [], [], []
             colors = plt.cm.tab10.colors
             for i in range(6):
                 chip_means, chip_errors = [], []
@@ -235,6 +239,11 @@ def analyze_and_plot(variables, folder_path_up, name, date, folder_path_down = N
                     chip_errors.append(fit_err)
                     all_means.append(mean_val)
                     all_errors.append(fit_err)
+                    failed_chip, failed_groups_chip, expected_value_chip, fails_chip = detect_failed_channels(chip_values, mean= mean_val)
+                    failed.append(failed_chip)
+                    failed_groups.append(failed_groups_chip)
+                    expected_value.append(expected_value_chip)
+                    fails.append(fails_chip)
                     if plot_hist:
                         plot_histogram_with_peaks(chip_values, threshold, n_channels=n_channels, mean=np.mean(chip_values), y_label=y_label,
                                                   title = f"{title_short} hist,for {name} on {labels[j]}, chip {i + 1}")
@@ -258,7 +267,27 @@ def analyze_and_plot(variables, folder_path_up, name, date, folder_path_down = N
             plt.close(fig1)
             fig2.savefig(os.path.join(folder_path_down, f"{var}_mean_fit_error_single_chips_{name}_{date}.png"))
             plt.close(fig2)
-            results[var] = {f"Chip_{i+1}": {"means": all_means[i::6], "errors": all_errors[i::6]} for i in range(6)}
+            results[var] = {f"Chip_{i+1}": {"means": all_means[i::6], "errors": all_errors[i::6], "failed_channels": failed[i::6],
+                            "failed_groups": failed_groups[i::6], "expected_value_fails": expected_value[i::6]}for i in range(6)}
+            results["result"] = {f"chip_{i+1}": {} for i in range(6)}
+
+            for i in range(6):
+                chip_key = f"chip_{i+1}"
+
+                fail_consecutive = fails[i][0]
+                fail_noise = fails[i][1]
+
+                if fail_consecutive and fail_noise:
+                    results["result"][chip_key] = (
+                        "failed for 8 and more consecutive failed channels "
+                        "and for at least one channel noise larger than 1.5 times expected value"
+                    )
+                elif fail_consecutive:
+                    results["result"][chip_key] = "failed for 8 and more consecutive failed channels"
+                elif fail_noise:
+                    results["result"][chip_key] = "failed for channel noise larger than 1.5 times expected value"
+                else:
+                    results["result"][chip_key] = "Passed"
 
     output_file = os.path.join(folder_path_down, f"{name}_{date}_results.json")
     save_results_to_json(results, output_file)
@@ -273,6 +302,6 @@ if __name__ == "__main__":
         folder_path_down = r"C:/sfg/Code/Graphs",
         name="SN20USEH40000148_H1",
         date="20250702",
-        per_chip=False,
+        per_chip=True,
         plot_hist = False
     )
