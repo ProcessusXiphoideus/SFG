@@ -6,9 +6,11 @@ import matplotlib.pyplot as plt
 from scipy.stats import linregress
 from scipy.signal import find_peaks
 from scipy.optimize import curve_fit
+from datetime import datetime, date
+from shutil import copy
 
 
-def plot_histogram_with_peaks(values, threshold=1.2, mean=None, y_label="Frequency", title = None):
+def histogram_with_peaks(values, output_file, threshold=1.2, mean=None, y_label="Frequency", title = None, filename = None):
 
     counts, bin_edges = values, np.arange(0, len(values) + 1, 1)
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
@@ -46,13 +48,14 @@ def plot_histogram_with_peaks(values, threshold=1.2, mean=None, y_label="Frequen
     plt.ylabel(y_label)
     plt.title(title)
     plt.legend()
-    plt.show()
+    plt.savefig(os.path.join(output_file,f"{filename}_histogram"), dpi=300)
+    plt.close()
 
     return fitted_params, bin_centers, counts, bin_edges
 
 
 
-def detect_failed_channels(values, mean, expectet_value = 600, threshold=1.2):
+def detect_failed_channels(values, mean, expected_value = 600, threshold=1.2):
     failed = []
     failed_expected_value = []
     consecutive_groups = []
@@ -72,7 +75,7 @@ def detect_failed_channels(values, mean, expectet_value = 600, threshold=1.2):
                 consecutive_groups[-1].append(i+1)
         else:
             counter = 0
-        if abs(val) > expectet_value * 1.5:
+        if abs(val) > expected_value * 1.5:
             failed_expected_value.append(i+1)
 
     if len(consecutive_groups) > 0:
@@ -85,15 +88,75 @@ def detect_failed_channels(values, mean, expectet_value = 600, threshold=1.2):
 
 
 
-def load_json_files(folder_path, name_filter, date_filter):
-    files = [f for f in os.listdir(folder_path) if f.endswith('.json') and f.startswith(name_filter) and date_filter in f]
+def to_date(obj) -> date:
+    """Převede string nebo datetime na čistý datetime.date"""
+    if isinstance(obj, date) and not isinstance(obj, datetime):
+        return obj
+    if isinstance(obj, datetime):
+        return obj.date()
+    if isinstance(obj, str):
+        return datetime.strptime(obj[:10], "%Y-%m-%d").date()
+    raise ValueError(f"Neumím převést {obj} na date")
+
+def load_json_files(folder_path, name_filter, date_start, date_end):
+    # Převedeme vstupní hranice hned na začátku
+    date_start = to_date(date_start)
+    date_end = to_date(date_end)
+
     data_list = []
-    for file in files:
-        path = os.path.join(folder_path, file)
-        with open(path, 'r') as f:
-            data = json.load(f)
-        data_list.append(data)
+    filenames = []
+
+    for filename in os.listdir(folder_path):
+        path = os.path.join(folder_path, filename)
+
+        if not os.path.isfile(path):
+            continue
+
+        with open(path, 'r', encoding='utf-8') as f:
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError:
+                continue
+
+        # Zpracování jména
+        name = data.get("properties", "").get("det_info",{}).get("name","")
+        name = name[2:] if name.startswith("SN") else name
+
+       
+
+
+        # Zpracování datumu
+        date_str = data.get("date", "")
+        if not date_str:
+            continue
+
+        date_obj = to_date(date_str)
+        
+
+        # Filtr podle jména a data
+        if name == name_filter and date_start <= date_obj <= date_end:
+            data_list.append(data)
+            filenames.append(filename)
+
+
+    print(f"Loaded {len(data_list)} files for {name_filter} between {date_start} and {date_end}")
+    # print([data.get("date", "") for data in data_list])
+    # print(filenames)
+    os.makedirs(os.path.join(folder_path, "used_files"), exist_ok=True)
+    for filename in filenames:
+        src = os.path.join(folder_path, filename)
+        dst = os.path.join(os.path.join(folder_path, "used_files"), filename)
+
+        if os.path.exists(src):
+            with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
+                fdst.write(fsrc.read())
+            print(f"Copied: {filename}")
+        else:
+            print(f"File not found: {filename}")
+    if len(data_list) == 0:
+        raise ValueError(f"No data found for {name_filter} between {date_start} and {date_end}")
     return data_list
+
 
 
 def analyze_channels(all_channels):
@@ -142,41 +205,40 @@ def plot_summary(means, errors, mask, labels, y_label, title, title_short, outpu
 
     
     
-def analyze_single(variables, folder_path_up, name, date, folder_path_down = None, per_chip=False,
+def analyze_single(variables, folder_path_up, name, date_start, date_end, folder_path_down = None, per_chip=False,
                       threshold=1.2, plot_hist = False):
     if folder_path_down == None:
         folder_path_down = folder_path_up
-    data_list = load_json_files(folder_path_up, name, date)
-    results = {"component": name, "date": date}
+    data_list = load_json_files(folder_path_up, name, date_start=date_start, date_end=date_end)
+    results = {"component": name, "date_range": {"start": date_start, "end": date_end}}
     folder_path_up = os.path.abspath(folder_path_up)
     folder_path_down = os.path.abspath(folder_path_down)
     
-
     for var in variables:
 
         if var == "innse_away":
             y_label = "Input Noise (ENC)"
-            title = f"Input Noise for {name} away on {date}"
+            title = f"Input Noise for {name} away"
             title_short = "Input Noise away"
         elif var == "innse_under":
             y_label = "Input Noise (ENC)"
-            title = f"Input Noise for {name} under on {date}"
+            title = f"Input Noise for {name} under"
             title_short = "Input Noise under"
         elif var == "gain_away":
             y_label = "Gain (MV/fC)"
-            title = f"Gain for {name} away on {date}"
+            title = f"Gain for {name} away"
             title_short = "Gain away"
         elif var == "gain_under":
             y_label = "Gain (MV/fC)"
-            title = f"Gain for {name} under on {date}"
+            title = f"Gain for {name} under"
             title_short = "Gain under"
         elif var == "vt50_away":
             y_label = "Vt50 (mV)"
-            title = f"Vt50 for {name} away on {date}"
+            title = f"Vt50 for {name} away"
             title_short = "Vt50 away"
         elif var == "vt50_under":
             y_label = "Vt50 (mV)"
-            title = f"Vt50 for {name} under on {date}"
+            title = f"Vt50 for {name} under"
             title_short = "Vt50 under"
         else:
             y_label = var
@@ -186,7 +248,11 @@ def analyze_single(variables, folder_path_up, name, date, folder_path_down = Non
         means, errors, labels, mask = [], [], [], []
 
         if not per_chip:
+            fig1, ax1 = plt.subplots(1, 1, figsize=(10, 6))
+            colors = plt.cm.tab10.colors
+            counter = 0
             for data in data_list:
+            
                 measurements = data.get('results', {}).get(var, {})
                 if not measurements:
                     continue
@@ -200,9 +266,18 @@ def analyze_single(variables, folder_path_up, name, date, folder_path_down = Non
                 mean_val, fit_err, y_fit = analyze_channels(np.array(all_channels))
                 means.append(mean_val)
                 errors.append(fit_err)
+                n_channels = list(range(1, len(all_channels) + 1))
+                ax1.plot(n_channels, all_channels, marker='.', linestyle='', markersize=5, color =colors[counter % len(colors)])
+                ax1.plot(n_channels, y_fit, color =colors[counter % len(colors)])
+                
+                counter += 1
+                plt.close(fig1)
                 if plot_hist:
-                    plot_histogram_with_peaks(all_channels, threshold, n_channels=np.arange(len(all_channels)),
-                                            mean=np.mean(all_channels), y_label=y_label, title = f"{title_short} hist, for {name} on {file_date}")
+                    titlefiledate = file_date.replace(":","-")
+                    print(titlefiledate)
+
+                    histogram_with_peaks(all_channels,os.path.join(folder_path_down,"histograms"), threshold = threshold,
+                                            mean=np.mean(all_channels), y_label=y_label, title = f"{title_short} hist, for {name} on {file_date}",filename=f"{var}_{name}_{titlefiledate[:-5]}")
                 failed, failed_groups, expected_value, fails = detect_failed_channels(all_channels, mean= mean_val,threshold=0.2)
                 results[var] = {
                     "means": means,
@@ -221,12 +296,19 @@ def analyze_single(variables, folder_path_up, name, date, folder_path_down = Non
                     results["result"] = "failed for channel noise larger that 1.5 times expected value"
                 else:
                     results["result"] = "Passed"
-            output_file = os.path.join(folder_path_down, f"{var}_mean_fit_error_{name}_{date}.png")
+            ax1.set_title(f"{title} for {name} on {date_start}-{date_end}")
+            ax1.set_xlabel("Channel Number")
+            ax1.set_ylabel(y_label)
+            ax1.grid(True)
+            fig1.tight_layout(rect=[0, 0, 1, 0.95])
+            fig1.savefig(os.path.join(folder_path_down, f"{var}_{name}_{file_date.replace(":","-")}.png"), dpi=300)
+            output_file = os.path.join(folder_path_down, f"{var}_mean_fit_error_{name}_{date_start}-{date_end}.png")
             plot_summary(means, errors, mask, labels, y_label, title, title_short, output_file)
         else:
             # per-chip vykreslování
             all_means = []
             all_errors = []
+            used_file_dates = []
             labels = [data.get('date') for data in data_list]
             mask = [(1 if data.get('properties', {}).get("DCS", {}).get("AMAC_NTCx", 0) > 0 else 0) for data in data_list]
             fig1, axs1 = plt.subplots(2, 3, figsize=(15, 8))
@@ -241,10 +323,15 @@ def analyze_single(variables, folder_path_up, name, date, folder_path_down = Non
                     measurements = data.get('results', {}).get(var, {})
                     if not measurements:
                         continue
+                    file_date = data.get('date')
+                    if file_date not in used_file_dates:
+                        used_file_dates.append(file_date)
+                    
                     chip_values = measurements[i]
                     n_channels = list(range(1 + i * 128, i * 128 + len(chip_values) + 1))
                     mean_val, fit_err, y_fit = analyze_channels(np.array(chip_values))
                     chip_means.append(mean_val)
+                    
                     chip_errors.append(fit_err)
                     all_means.append(mean_val)
                     all_errors.append(fit_err)
@@ -254,8 +341,8 @@ def analyze_single(variables, folder_path_up, name, date, folder_path_down = Non
                     expected_value.append(expected_value_chip)
                     fails.append(fails_chip)
                     if plot_hist:
-                        plot_histogram_with_peaks(chip_values, threshold, n_channels=n_channels, mean=np.mean(chip_values), y_label=y_label,
-                                                title = f"{title_short} hist,for {name} on {labels[j]}, chip {i + 1}")
+                        histogram_with_peaks(chip_values, os.path.join(folder_path_down,"histograms"), threshold, mean=np.mean(chip_values), y_label=y_label,
+                                                title = f"{title_short} hist,for {name} on {labels[j]}, chip {i + 1}", filename=f"{var}_{name}_{labels[j][:-5].replace(':','-')}_chip_{i+1}")
                     axs1[i].plot(n_channels, chip_values, marker='.', linestyle='', markersize=5, color = colors[j % 6])
                     axs1[i].plot(n_channels, y_fit, color = colors[j % 6])
                 axs1[i].set_title(f"Chip {i+1}")
@@ -267,19 +354,22 @@ def analyze_single(variables, folder_path_up, name, date, folder_path_down = Non
                 axs2[i].set_title(f"Chip {i+1}")
                 axs2[i].set_ylabel(y_label)
                 axs2[i].grid(True)
-            fig1.suptitle(f"{title} for all chips", fontsize=16)
-            fig2.suptitle(f"Mean values with fit errors, {title} for all chips")
+            fig1.suptitle(f"{title} for all chips, {date_start}-{date_end}", fontsize=16)
+            fig2.suptitle(f"Mean values with fit errors, {title} for all chips, {date_start}-{date_end}", fontsize=16)
             fig1.tight_layout(rect=[0, 0, 1, 0.95])
             fig2.tight_layout(rect=[0, 0, 1, 0.95])
-            fig1.savefig(os.path.join(folder_path_down, f"{var}_single_chips_{name}_{date}.png"))
+            fig1.savefig(os.path.join(folder_path_down, f"{var}_single_chips_{name}_{date_start}-{date_end}.png"))
             plt.close(fig1)
-            fig2.savefig(os.path.join(folder_path_down, f"{var}_mean_fit_error_single_chips_{name}_{date}.png"))
+            fig2.savefig(os.path.join(folder_path_down, f"{var}_mean_fit_error_single_chips_{name}_{date_start}-{date_end}.png"))
             plt.close(fig2)
+
             
             results[var] = {f"Chip_{i+1}": {"means": all_means[i::6], "errors": all_errors[i::6], "failed_channels": failed[i::6],
                             "failed_groups": failed_groups[i::6], "expected_value_fails": expected_value[i::6]}for i in range(6)}
             
             results[var]["result"] = {f"chip_{i+1}": {} for i in range(6)}
+            results[var]["used_file_dates"] = used_file_dates
+            
 
             for i in range(6):
                 chip_key = f"chip_{i+1}"
@@ -299,14 +389,21 @@ def analyze_single(variables, folder_path_up, name, date, folder_path_down = Non
                 else:
                     results[var]["result"][chip_key] = "Passed"
 
-    output_file = os.path.join(folder_path_down, f"{name}_{date}_results.json")
+    output_file = os.path.join(folder_path_down, f"{name}_{date_start}-{date_end}_results.json")
     save_results_to_json(results, output_file)
     return results
 
-def analyze_and_plot(variables, folder_path_up, component, date, folder_path_down = None, per_chip=False,
+def analyze_and_plot(variables, folder_path_up, component, date_start, date_end, folder_path_down = None, per_chip=False,
                       threshold=1.2, plot_hist = False, under = True, away = True, H0 = True, H1 = True):
-    os.makedirs(os.path.join(folder_path_down, f"{component}_{date}"), exist_ok=True)
-    folder_path_down = f"{folder_path_down}/{component}_{date}"
+    
+    if per_chip:
+        os.makedirs(os.path.join(folder_path_down, f"{component}_{date_start}-{date_end}_single"), exist_ok=True)
+        os.makedirs(os.path.join(folder_path_down,f"{component}_{date_start}-{date_end}_single","histograms"), exist_ok=True)
+        folder_path_down = f"{folder_path_down}/{component}_{date_start}-{date_end}_single"
+    else:
+        os.makedirs(os.path.join(folder_path_down, f"{component}_{date_start}-{date_end}"), exist_ok=True)
+        os.makedirs(os.path.join(folder_path_down,f"{component}_{date_start}-{date_end}","histograms"), exist_ok=True)
+        folder_path_down = f"{folder_path_down}/{component}_{date_start}-{date_end}"
 
 
     if H0 and H1:
@@ -337,23 +434,23 @@ def analyze_and_plot(variables, folder_path_up, component, date, folder_path_dow
     print(name)
 
     for name in name:
-        analyze_single(variables, folder_path_up, name, date, folder_path_down, per_chip, threshold, plot_hist)
+        analyze_single(variables, folder_path_up, name, date_start,date_end, folder_path_down, per_chip, threshold, plot_hist)
 
 
 
-if __name__ == "__main__":
-    analyze_and_plot(
-        variables=["Input Noise"],
-        folder_path_up=r"C:/sfg/json",
-        folder_path_down = r"C:/sfg/Code/Graphs",
-        component="SN20USEH40000148",
-        date="20250702",
-        per_chip=True,
-        plot_hist = False,
-        under = True,
-        away = True,
-        H0 = True,
-        H1 = True
-    )
+# if __name__ == "__main__":
+    # analyze_and_plot(
+    #     variables=["Input Noise"],
+    #     folder_path_up=r"C:/sfg/json",
+    #     folder_path_down = r"C:/sfg/Code/Graphs",
+    #     component="SN20USEH40000148",
+    #     date="20250702",
+    #     per_chip=True,
+    #     plot_hist = False,
+    #     under = True,
+    #     away = True,
+    #     H0 = True,
+    #     H1 = True
+    # )
 
 

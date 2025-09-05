@@ -1,13 +1,13 @@
-import os
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from tkinter import filedialog, messagebox
 from analyze_data import analyze_and_plot
 
+
 # Vytvoření okna
 app = ttk.Window(themename="flatly")
 app.title("GUI pro analyze_data")
-app.geometry("1200x600")
+app.geometry("1300x700")
 
 
 def vyber_slozku(entry_widget):
@@ -17,20 +17,27 @@ def vyber_slozku(entry_widget):
         entry_widget.insert(0, cesta)
 
 
+# --- spustit() jen vrací stringy dál ---
 def spustit():
     folder_path_up = entry1.get()
     folder_path_down = entry2.get()
-    
     name = entry3.get()
-    date = entry4.get()
+
+    # stringy "yyyy-mm-dd" z pickerů
+    date_start = entry4.entry.get()
+    print(date_start)
+    date_end   = entry5.entry.get()
+    print(date_end)
+
     variables_selected = [v.get() for v in variables]
-    
+
     analyze_and_plot(
         variables=variables_selected,
         folder_path_up=folder_path_up,
         folder_path_down=folder_path_down,
         component=name,
-        date=date,
+        date_start=date_start,   # ← posíláme jako string
+        date_end=date_end,       # ← posíláme jako string
         per_chip=var1.get(),
         plot_hist=var2.get(),
         under=var3.get(),
@@ -69,38 +76,43 @@ ttk.Label(app, text="Name:").grid(row=len(variables) + 4, column=0, padx=10, pad
 entry3 = ttk.Entry(app, width=40)
 entry3.grid(row=len(variables) + 4, column=1, columnspan=2, padx=10, pady=5, sticky="ew")
 
-ttk.Label(app, text="Date:").grid(row=len(variables) + 5, column=0, padx=10, pady=5, sticky="w")
-entry4 = ttk.Entry(app, width=40)
-entry4.grid(row=len(variables) + 5, column=1, columnspan=2, padx=10, pady=5, sticky="ew")
+# Date picks calendars
+ttk.Label(app, text="Date start:").grid(row=len(variables) + 5, column=0, padx=10, pady=5, sticky="w")
+entry4 = ttk.DateEntry(app, width=20, dateformat="%Y-%m-%d")
+entry4.grid(row=len(variables) + 5, column=1, padx=10, pady=5, sticky="w")
+
+ttk.Label(app, text="Date end:").grid(row=len(variables) + 6, column=0, padx=10, pady=5, sticky="w")
+entry5 = ttk.DateEntry(app, width=20, dateformat="%Y-%m-%d")
+entry5.grid(row=len(variables) + 6, column=1, padx=10, pady=5, sticky="w")
 
 # Checkboxy
 var1 = ttk.BooleanVar()
 check1 = ttk.Checkbutton(app, text="Analyze single chips", variable=var1)
-check1.grid(row=len(variables) + 6, column=0, columnspan=3, padx=10, pady=5, sticky="w")
+check1.grid(row=len(variables) + 7, column=0, columnspan=3, padx=10, pady=5, sticky="w")
 
 var2 = ttk.BooleanVar()
 check2 = ttk.Checkbutton(app, text="Plot Histogram", variable=var2)
-check2.grid(row=len(variables) + 7, column=0, columnspan=3, padx=10, pady=5, sticky="w")
+check2.grid(row=len(variables) + 8, column=0, columnspan=3, padx=10, pady=5, sticky="w")
 
 var3 = ttk.BooleanVar(value=True)
 check3 = ttk.Checkbutton(app, text = "Under", variable=var3)
-check3.grid(row=len(variables) + 8, column=0, columnspan=3, padx=10, pady=5, sticky="w")
+check3.grid(row=len(variables) + 9, column=0, columnspan=3, padx=10, pady=5, sticky="w")
 
 var4 = ttk.BooleanVar(value=True)
 check4 = ttk.Checkbutton(app, text = "Away", variable=var4)
-check4.grid(row=len(variables) + 8, column=1, columnspan=3, padx=10, pady=5, sticky="w")
+check4.grid(row=len(variables) + 9, column=1, columnspan=3, padx=10, pady=5, sticky="w")
 
 var5 = ttk.BooleanVar(value=True)
 check5 = ttk.Checkbutton(app, text = "H0", variable=var5)
-check5.grid(row=len(variables) + 9, column=0, columnspan=3, padx=10, pady=5, sticky="w")
+check5.grid(row=len(variables) + 10, column=0, columnspan=3, padx=10, pady=5, sticky="w")
 
 var6 = ttk.BooleanVar(value=True)
 check6 = ttk.Checkbutton(app, text = "H1", variable=var6)
-check6.grid(row=len(variables) + 9, column=1, columnspan=3, padx=10, pady=5, sticky="w")
+check6.grid(row=len(variables) + 10, column=1, columnspan=3, padx=10, pady=5, sticky="w")
 
 # Tlačítko Spustit
 tlacitko = ttk.Button(app, text="Analyze", bootstyle="SUCCESS", command=spustit)
-tlacitko.grid(row=len(variables) + 10, column=0, columnspan=3, padx=10, pady=40)
+tlacitko.grid(row=len(variables) + 11, column=0, columnspan=3, padx=10, pady=40)
 
 # Grid konfigurace
 app.grid_columnconfigure(1, weight=1)
