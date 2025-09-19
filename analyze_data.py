@@ -3,11 +3,12 @@ import json
 import math
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 from scipy.stats import linregress
 from scipy.signal import find_peaks
 from scipy.optimize import curve_fit
 from datetime import datetime, date
-from shutil import copy
+
 
 
 def histogram_with_peaks(values, output_file, threshold=1.2, mean=None, y_label="Frequency", title = None, filename = None):
@@ -150,7 +151,7 @@ def load_json_files(folder_path, name_filter, date_start, date_end):
         if os.path.exists(src):
             with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
                 fdst.write(fsrc.read())
-            print(f"Copied: {filename}")
+            # print(f"Copied: {filename}")
         else:
             print(f"File not found: {filename}")
     if len(data_list) == 0:
@@ -203,6 +204,158 @@ def plot_summary(means, errors, mask, labels, y_label, title, title_short, outpu
     fig.savefig(output_file, dpi=300)
     plt.close(fig)
 
+def plot_boxplot(data: list, temps: list, save_path: str, result_name: str, info_lines: tuple, yname: str, failed_indices: list):
+    plt.figure(figsize=(12, 8))
+    ax = plt.gca()
+
+    colors = []                       
+    for t in temps[:len(data)]:  
+        if t > 0:
+            colors.append("#CC3B06")  
+        else:
+            colors.append('#4D96FF')  
+    
+    box = plt.boxplot(data, 
+                    patch_artist=True,
+                    showfliers=False,
+                    widths=0.7)
+    for patch, color in zip(box['boxes'], colors):
+        patch.set_facecolor(color)
+        patch.set_edgecolor('black')
+    for element in ['whiskers', 'caps', 'medians']:
+        plt.setp(box[element], color='#2D4059', linewidth=1.5)
+    
+    # mark failed tests
+    for i, (patch, median_line) in enumerate(zip(box['boxes'], box['medians'])):
+        if (i+1) in failed_indices:  # index for boxplot begin from 1 in mat
+            patch.set_hatch('////')
+            patch.set_edgecolor('black')
+            median_line.set_linewidth(3)
+    
+    y_min, y_max = ax.get_ylim()
+    # # mark shunty tests
+    # shunted_tests = [3, 23]  
+    # for test_num in shunted_tests:
+    #     idx = test_num - 1  
+    #     if idx >= len(data):
+    #         continue
+    #     median = box['medians'][idx]
+    #     x = median.get_xdata()[1]
+    #     y = y_min + 1
+    #     ax.scatter(x - 0.35, y,
+    #             marker='^',
+    #             s=200,
+    #             color='#2A9D8F',
+    #             edgecolors='black',
+    #             zorder=4,
+    #             label=f'Shunted Test {test_num}' if idx == 2 else "")
+    
+    # embed info (adjust the position)
+    text_params = {
+        'fontsize': 12,
+        'ha': 'left',
+        'va': 'bottom',
+        'bbox': dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='lightgray'),
+        'linespacing': 1.5
+    }
+    base_y = y_max + 0.1*(y_max - y_min)  
+    ax.text(0.8,  
+        base_y,
+        info_lines[0],
+        **text_params)
+    ax.text(0.8,
+        base_y - 0.06*(y_max - y_min),
+        info_lines[1],
+        **text_params)
+    ax.text(0.8,
+        base_y - 0.12*(y_max - y_min),
+        info_lines[2],
+        **text_params)
+    new_ymax = base_y + 0.05*(y_max - y_min)
+    ax.set_ylim(y_min, max(y_max, new_ymax))
+
+    legend_elements = [
+        Patch(facecolor='#CC7306', edgecolor='#2D4059', label='Warm Test (T > 0℃)'),
+        Patch(facecolor='#4D96FF', edgecolor='#2D4059', label='Cold Test (T < 0℃)'),
+        Patch(facecolor='white', edgecolor='black', hatch='////', label='Failed Test'),
+        # line2D([0], [0], marker='^',color='w',markerfacecolor='#2A9D8F',markersize=15,label='Shunted Tests')
+    ]
+    plt.legend(handles=legend_elements, loc='upper right', fontsize=12)
+    plt.title(f"Long Term Test: {result_name}", fontsize=16, pad=1, y=1.02)
+    plt.xlabel('Test Sequence', fontsize=14)
+    plt.ylabel(f"{yname}", fontsize=14)
+    plt.xticks(range(1, len(data)+1), [f"T{i:02d}" for i in range(1, len(data)+1)], rotation=45)
+    
+    for i, test_data in enumerate(data):
+        median = np.median(test_data)
+        plt.text(i+1, median, f'{median:.2f}', 
+                horizontalalignment='center',
+                fontsize=8)
+    
+    plt.grid(True, linestyle='--', alpha=0.6, axis='y')
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"Figure saved：{save_path}")
+
+def plot_boxplot_on_ax(ax, data, temps, result_name, info_lines, yname, failed_indices):
+    colors = ['#CC3B06' if t > 0 else '#4D96FF' for t in temps[:len(data)]]
+
+    box = ax.boxplot(
+        data,
+        patch_artist=True,
+        showfliers=False,
+        widths=0.7
+    )
+
+    # barvy
+    for patch, color in zip(box['boxes'], colors):
+        patch.set_facecolor(color)
+        patch.set_edgecolor('black')
+    for element in ['whiskers', 'caps', 'medians']:
+        plt.setp(box[element], color='#2D4059', linewidth=1.5)
+
+    # mark failed
+    for i, (patch, median_line) in enumerate(zip(box['boxes'], box['medians'])):
+        if (i + 1) in failed_indices:
+            patch.set_hatch('////')
+            median_line.set_linewidth(3)
+
+    # popisky
+    ax.set_xlabel('Test Sequence')
+    ax.set_ylabel(yname)
+    ax.set_xticks(range(1, len(data) + 1))
+    ax.set_xticklabels([f"T{i:02d}" for i in range(1, len(data) + 1)], rotation=45)
+
+    y_min, y_max = ax.get_ylim()
+    base_y = y_max + 0.1 * (y_max - y_min)
+    text_params = {
+        'fontsize': 12,
+        'ha': 'left',
+        'va': 'bottom',
+        'bbox': dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='lightgray'),
+        'linespacing': 1.5
+    }
+
+    # aby se text vešel, zvedneme horní limit
+    new_ymax = base_y + 0.05 * (y_max - y_min)
+    ax.set_ylim(y_min, max(y_max, new_ymax))
+
+    # --- Legenda se stejnými prvky ---
+    legend_elements = [
+        Patch(facecolor='#CC7306', edgecolor='#2D4059', label='Warm Test (T > 0℃)'),
+        Patch(facecolor='#4D96FF', edgecolor='#2D4059', label='Cold Test (T < 0℃)'),
+        Patch(facecolor='white', edgecolor='black', hatch='////', label='Failed Test'),
+    ]
+    ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
+
+    for i, test_data in enumerate(data):
+        median = np.median(test_data)
+        ax.text(i+1, median, f'{median:.2f}', 
+                horizontalalignment='center',
+                fontsize=8)
+
+
+    ax.grid(True, linestyle='--', alpha=0.6, axis='y')
+
     
     
 def analyze_single(variables, folder_path_up, name, date_start, date_end, folder_path_down = None, per_chip=False,
@@ -210,6 +363,8 @@ def analyze_single(variables, folder_path_up, name, date_start, date_end, folder
     if folder_path_down == None:
         folder_path_down = folder_path_up
     data_list = load_json_files(folder_path_up, name, date_start=date_start, date_end=date_end)
+    sorted_list = sorted(data_list,key=lambda d: datetime.fromisoformat(d["date"].replace("Z", "+00:00")))
+
     results = {"component": name, "date_range": {"start": date_start, "end": date_end}}
     folder_path_up = os.path.abspath(folder_path_up)
     folder_path_down = os.path.abspath(folder_path_down)
@@ -248,37 +403,44 @@ def analyze_single(variables, folder_path_up, name, date_start, date_end, folder
         means, errors, labels, mask = [], [], [], []
 
         if not per_chip:
-            fig1, ax1 = plt.subplots(1, 1, figsize=(10, 6))
-            colors = plt.cm.tab10.colors
+            # fig1, ax1 = plt.subplots(1, 1, figsize=(10, 6))
+            # colors = plt.cm.tab10.colors
             counter = 0
-            for data in data_list:
-            
+            all_tests = []
+            all_temps = []
+
+            for data in sorted_list:
                 measurements = data.get('results', {}).get(var, {})
                 if not measurements:
                     continue
-                temp = data.get('properties', {}).get("DCS", {}).get("AMAC_NTCx", {})
+
+                temp = data.get('properties', {}).get("DCS", {}).get("AMAC_NTCy", {})
+                all_temps.append(temp)
                 mask.append(1 if temp > 0 else 0)
                 file_date = data.get('date')
                 labels.append(file_date)
                 all_channels = []
+
                 for chip in measurements:
                     all_channels.extend(chip)
+                all_tests.append(all_channels)
                 mean_val, fit_err, y_fit = analyze_channels(np.array(all_channels))
                 means.append(mean_val)
                 errors.append(fit_err)
-                n_channels = list(range(1, len(all_channels) + 1))
-                ax1.plot(n_channels, all_channels, marker='.', linestyle='', markersize=5, color =colors[counter % len(colors)])
-                ax1.plot(n_channels, y_fit, color =colors[counter % len(colors)])
+
+                # n_channels = list(range(1, len(all_channels) + 1))
+                # ax1.plot(n_channels, all_channels, marker='.', linestyle='', markersize=5, color =colors[counter % len(colors)])
+                # ax1.plot(n_channels, y_fit, color =colors[counter % len(colors)])
                 
                 counter += 1
-                plt.close(fig1)
                 if plot_hist:
                     titlefiledate = file_date.replace(":","-")
                     print(titlefiledate)
 
                     histogram_with_peaks(all_channels,os.path.join(folder_path_down,"histograms"), threshold = threshold,
                                             mean=np.mean(all_channels), y_label=y_label, title = f"{title_short} hist, for {name} on {file_date}",filename=f"{var}_{name}_{titlefiledate[:-5]}")
-                failed, failed_groups, expected_value, fails = detect_failed_channels(all_channels, mean= mean_val,threshold=0.2)
+                failed, failed_groups, expected_value, fails = detect_failed_channels(all_channels, mean= mean_val,threshold=1.2)
+                
                 results[var] = {
                     "means": means,
                     "errors": errors,
@@ -296,39 +458,59 @@ def analyze_single(variables, folder_path_up, name, date_start, date_end, folder
                     results["result"] = "failed for channel noise larger that 1.5 times expected value"
                 else:
                     results["result"] = "Passed"
-            ax1.set_title(f"{title} for {name} on {date_start}-{date_end}")
-            ax1.set_xlabel("Channel Number")
-            ax1.set_ylabel(y_label)
-            ax1.grid(True)
-            fig1.tight_layout(rect=[0, 0, 1, 0.95])
-            fig1.savefig(os.path.join(folder_path_down, f"{var}_{name}_{file_date.replace(":","-")}.png"), dpi=300)
-            output_file = os.path.join(folder_path_down, f"{var}_mean_fit_error_{name}_{date_start}-{date_end}.png")
-            plot_summary(means, errors, mask, labels, y_label, title, title_short, output_file)
+
+            # ax1.set_title(f"{title} for {name} on {date_start}-{date_end}")
+            # ax1.set_xlabel("Channel Number")
+            # ax1.set_ylabel(y_label)
+            # ax1.grid(True)
+            # fig1.tight_layout(rect=[0, 0, 1, 0.95])
+            # fig1.savefig(os.path.join(folder_path_down, f"{var}_{name}_{file_date.replace(":","-")}.png"), dpi=300)
+            # output_file = os.path.join(folder_path_down, f"{var}_mean_fit_error_{name}_{date_start}-{date_end}.png")
+            # plot_summary(means, errors, mask, labels, y_label, title, title_short, output_file)
+
+            plot_boxplot(all_tests, all_temps, os.path.join(folder_path_down,f"{var}_boxplot_{name}_{date_start}-{date_end}.png"),
+                         result_name=name,
+                         info_lines=(
+                             f"name: {name}",
+                             f"Threshold for failed channel: {threshold} x mean",
+                             f"Failed channels marked with '////' hatch"
+                         ),
+                         yname=y_label,
+                         failed_indices=failed
+                         )
         else:
             # per-chip vykreslování
             all_means = []
             all_errors = []
+            all_test_chips = []
             used_file_dates = []
-            labels = [data.get('date') for data in data_list]
-            mask = [(1 if data.get('properties', {}).get("DCS", {}).get("AMAC_NTCx", 0) > 0 else 0) for data in data_list]
-            fig1, axs1 = plt.subplots(2, 3, figsize=(15, 8))
-            axs1 = axs1.ravel()
-            fig2, axs2 = plt.subplots(2, 3, figsize=(18, 8))
-            axs2 = axs2.ravel()
+            """
+            # labels = [data.get('date') for data in data_list]
+            # fig1, axs1 = plt.subplots(2, 3, figsize=(15, 8))
+            # axs1 = axs1.ravel()
+            # fig2, axs2 = plt.subplots(2, 3, figsize=(18, 8))
+            # axs2 = axs2.ravel()
+            """
             failed, failed_groups, expected_value, fails = [], [], [], []
-            colors = plt.cm.tab10.colors
+            all_temps = []
+            len_used_data = 0
+
             for i in range(6):
                 chip_means, chip_errors = [], []
-                for j, data in enumerate(data_list):
+                for j, data in enumerate(sorted_list):
                     measurements = data.get('results', {}).get(var, {})
                     if not measurements:
                         continue
+                    temp = data.get('properties', {}).get("DCS", {}).get("AMAC_NTCy", {})
+                    all_temps.append(temp)
                     file_date = data.get('date')
                     if file_date not in used_file_dates:
                         used_file_dates.append(file_date)
-                    
+                    len_used_data += 1
                     chip_values = measurements[i]
-                    n_channels = list(range(1 + i * 128, i * 128 + len(chip_values) + 1))
+                   
+                    all_test_chips.append(chip_values)
+                    # n_channels = list(range(1 + i * 128, i * 128 + len(chip_values) + 1))
                     mean_val, fit_err, y_fit = analyze_channels(np.array(chip_values))
                     chip_means.append(mean_val)
                     
@@ -343,25 +525,52 @@ def analyze_single(variables, folder_path_up, name, date_start, date_end, folder
                     if plot_hist:
                         histogram_with_peaks(chip_values, os.path.join(folder_path_down,"histograms"), threshold, mean=np.mean(chip_values), y_label=y_label,
                                                 title = f"{title_short} hist,for {name} on {labels[j]}, chip {i + 1}", filename=f"{var}_{name}_{labels[j][:-5].replace(':','-')}_chip_{i+1}")
-                    axs1[i].plot(n_channels, chip_values, marker='.', linestyle='', markersize=5, color = colors[j % 6])
-                    axs1[i].plot(n_channels, y_fit, color = colors[j % 6])
-                axs1[i].set_title(f"Chip {i+1}")
-                axs1[i].set_xlabel("Channel Number")
-                axs1[i].set_ylabel(y_label)
-                axs1[i].grid(True)
-                x_pos = np.arange(len(chip_means))
-                axs2[i].errorbar(x_pos + 1, chip_means, yerr=chip_errors)
-                axs2[i].set_title(f"Chip {i+1}")
-                axs2[i].set_ylabel(y_label)
-                axs2[i].grid(True)
-            fig1.suptitle(f"{title} for all chips, {date_start}-{date_end}", fontsize=16)
-            fig2.suptitle(f"Mean values with fit errors, {title} for all chips, {date_start}-{date_end}", fontsize=16)
-            fig1.tight_layout(rect=[0, 0, 1, 0.95])
-            fig2.tight_layout(rect=[0, 0, 1, 0.95])
-            fig1.savefig(os.path.join(folder_path_down, f"{var}_single_chips_{name}_{date_start}-{date_end}.png"))
-            plt.close(fig1)
-            fig2.savefig(os.path.join(folder_path_down, f"{var}_mean_fit_error_single_chips_{name}_{date_start}-{date_end}.png"))
-            plt.close(fig2)
+                    # axs1[i].plot(n_channels, chip_values, marker='.', linestyle='', markersize=5, color = colors[j % 6])
+                    # axs1[i].plot(n_channels, y_fit, color = colors[j % 6])
+            #     axs1[i].set_title(f"Chip {i+1}")
+            #     axs1[i].set_xlabel("Channel Number")
+            #     axs1[i].set_ylabel(y_label)
+            #     axs1[i].grid(True)
+            #     x_pos = np.arange(len(chip_means))
+            #     axs2[i].errorbar(x_pos + 1, chip_means, yerr=chip_errors)
+            #     axs2[i].set_title(f"Chip {i+1}")
+            #     axs2[i].set_ylabel(y_label)
+            #     axs2[i].grid(True)
+            # fig1.suptitle(f"{title} for all chips, {date_start}-{date_end}", fontsize=16)
+            # fig2.suptitle(f"Mean values with fit errors, {title} for all chips, {date_start}-{date_end}", fontsize=16)
+            # fig1.tight_layout(rect=[0, 0, 1, 0.95])
+            # fig2.tight_layout(rect=[0, 0, 1, 0.95])
+            # fig1.savefig(os.path.join(folder_path_down, f"{var}_single_chips_{name}_{date_start}-{date_end}.png"))
+            # plt.close(fig1)
+            # fig2.savefig(os.path.join(folder_path_down, f"{var}_mean_fit_error_single_chips_{name}_{date_start}-{date_end}.png"))
+            # plt.close(fig2)
+            
+            fig, axs = plt.subplots(2, 3, figsize=(18, 10))
+            axs = axs.ravel() 
+
+            for i in range(6):
+                n_tests = len_used_data // 6
+                chip_data = all_test_chips[i*n_tests:(i+1)*n_tests]
+                failed_chip = failed[i*n_tests:(i+1)*n_tests]
+
+                plot_boxplot_on_ax(
+                    axs[i],
+                    data=chip_data,
+                    temps=all_temps,
+                    result_name=f"{i+1}",
+                    info_lines=(
+                        f"name: {name}, chip: {i+1}",
+                        f"Threshold for failed channel: {threshold} x mean",
+                        f"Failed channels marked with '////' hatch"
+                    ),
+                    yname=y_label,
+                    failed_indices = failed_chip
+                )
+
+            fig.suptitle(f"Long Term Test: {name}", fontsize=16)
+            fig.tight_layout(rect=[0, 0, 1, 0.96])
+            fig.savefig(os.path.join(folder_path_down,f"{var}_boxplot_{name}_{date_start}-{date_end}_allchips.png"),dpi=300)
+            plt.close(fig)
 
             
             results[var] = {f"Chip_{i+1}": {"means": all_means[i::6], "errors": all_errors[i::6], "failed_channels": failed[i::6],
@@ -438,19 +647,20 @@ def analyze_and_plot(variables, folder_path_up, component, date_start, date_end,
 
 
 
-# if __name__ == "__main__":
-    # analyze_and_plot(
-    #     variables=["Input Noise"],
-    #     folder_path_up=r"C:/sfg/json",
-    #     folder_path_down = r"C:/sfg/Code/Graphs",
-    #     component="SN20USEH40000148",
-    #     date="20250702",
-    #     per_chip=True,
-    #     plot_hist = False,
-    #     under = True,
-    #     away = True,
-    #     H0 = True,
-    #     H1 = True
-    # )
+if __name__ == "__main__":
+    analyze_and_plot(
+        variables=["Input Noise"],
+        folder_path_up=r"C:/sfg/json",
+        folder_path_down = r"C:/sfg/Code/Graphs",
+        component="20USEH40000148",
+        date_start="2025-07-02",
+        date_end="2025-07-02",
+        per_chip=True,
+        plot_hist = False,
+        under = True,
+        away = True,
+        H0 = True,
+        H1 = True
+    )
 
 
