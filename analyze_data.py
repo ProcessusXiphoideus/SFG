@@ -227,30 +227,13 @@ def plot_boxplot(data: list, temps: list, save_path: str, result_name: str, info
     
     # mark failed tests
     for i, (patch, median_line) in enumerate(zip(box['boxes'], box['medians'])):
-        if (i+1) in failed_indices:  # index for boxplot begin from 1 in mat
+        if (i+1) in failed_indices:
             patch.set_hatch('////')
             patch.set_edgecolor('black')
             median_line.set_linewidth(3)
     
     y_min, y_max = ax.get_ylim()
-    # # mark shunty tests
-    # shunted_tests = [3, 23]  
-    # for test_num in shunted_tests:
-    #     idx = test_num - 1  
-    #     if idx >= len(data):
-    #         continue
-    #     median = box['medians'][idx]
-    #     x = median.get_xdata()[1]
-    #     y = y_min + 1
-    #     ax.scatter(x - 0.35, y,
-    #             marker='^',
-    #             s=200,
-    #             color='#2A9D8F',
-    #             edgecolors='black',
-    #             zorder=4,
-    #             label=f'Shunted Test {test_num}' if idx == 2 else "")
-    
-    # embed info (adjust the position)
+   
     text_params = {
         'fontsize': 12,
         'ha': 'left',
@@ -296,7 +279,7 @@ def plot_boxplot(data: list, temps: list, save_path: str, result_name: str, info
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     print(f"Figure saved：{save_path}")
 
-def plot_boxplot_on_ax(ax, data, temps, result_name, info_lines, yname, failed_indices):
+def plot_boxplot_on_ax(ax, data, temps, yname, failed_indices):
     colors = ['#CC3B06' if t > 0 else '#4D96FF' for t in temps[:len(data)]]
 
     box = ax.boxplot(
@@ -327,19 +310,12 @@ def plot_boxplot_on_ax(ax, data, temps, result_name, info_lines, yname, failed_i
 
     y_min, y_max = ax.get_ylim()
     base_y = y_max + 0.1 * (y_max - y_min)
-    text_params = {
-        'fontsize': 12,
-        'ha': 'left',
-        'va': 'bottom',
-        'bbox': dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='lightgray'),
-        'linespacing': 1.5
-    }
 
-    # aby se text vešel, zvedneme horní limit
+
     new_ymax = base_y + 0.05 * (y_max - y_min)
     ax.set_ylim(y_min, max(y_max, new_ymax))
 
-    # --- Legenda se stejnými prvky ---
+    
     legend_elements = [
         Patch(facecolor='#CC7306', edgecolor='#2D4059', label='Warm Test (T > 0℃)'),
         Patch(facecolor='#4D96FF', edgecolor='#2D4059', label='Cold Test (T < 0℃)'),
@@ -356,10 +332,56 @@ def plot_boxplot_on_ax(ax, data, temps, result_name, info_lines, yname, failed_i
 
     ax.grid(True, linestyle='--', alpha=0.6, axis='y')
 
+def plotfailed_per_test(n_failed_channels,n_tests,n_channels ,output_file,info_lines):
+    plt.figure(figsize=(12, 8))
+    ax = plt.gca()
+    plt.bar(range(1, n_tests + 1), n_failed_channels, color='#E76F51')
+    plt.xlabel('Test Sequence')
+    plt.xticks(range(1, n_tests + 1), [f"T{i:02d}" for i in range(1, n_tests + 1)], rotation=45)
+    plt.ylabel('Number of Failed Channels')
+    plt.axhline(y=math.ceil(n_channels*0.01), color='red', linestyle='--', label = "Threshold for failed test")
+    plt.title('Number of Failed Channels per Test')
+
+    text_params = {
+        'fontsize': 12,
+        'ha': 'left',
+        'va': 'bottom',
+        'bbox': dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='lightgray'),
+        'linespacing': 1.5
+    }
+    y_min, y_max = ax.get_ylim()
+    base_y = y_max + 0.1*(y_max - y_min)  
+    ax.text(0.8,  
+        base_y,
+        info_lines[0],
+        **text_params)
+    ax.text(0.8,
+        base_y - 0.06*(y_max - y_min),
+        info_lines[1],
+        **text_params)
+    new_ymax = base_y + 0.05*(y_max - y_min)
+    ax.set_ylim(y_min, max(y_max, new_ymax))
+    
+    plt.grid(
+            True,              
+            which='both',     
+            axis='both',              
+            linestyle='--',            
+            linewidth=0.8,
+            color='gray',
+            alpha=0.6)
+
+    
+    plt.legend(loc='upper right', fontsize=12)
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    
+
     
     
 def analyze_single(variables, folder_path_up, name, date_start, date_end, folder_path_down = None, per_chip=False,
-                      threshold=1.2, plot_hist = False):
+                      threshold=1.2, plot_hist = False,n_chips = 6):
     if folder_path_down == None:
         folder_path_down = folder_path_up
     data_list = load_json_files(folder_path_up, name, date_start=date_start, date_end=date_end)
@@ -400,26 +422,25 @@ def analyze_single(variables, folder_path_up, name, date_start, date_end, folder
             title = var
             title_short = var
 
-        means, errors, labels, mask = [], [], [], []
+        
 
         if not per_chip:
-            # fig1, ax1 = plt.subplots(1, 1, figsize=(10, 6))
-            # colors = plt.cm.tab10.colors
-            counter = 0
-            all_tests = []
-            all_temps = []
+            means, errors, test_dates= [], [], []
+            
+            all_tests = [] #Zde sbíráme data pro každý test (seznam seznamu; každý vnitřní seznam je jeden test)
+            all_temps = [] #Zde sbíráme teploty pro každý test
+            all_failed, all_failed_groups, all_expected_value, all_fails = [], [], [], []
 
             for data in sorted_list:
-                measurements = data.get('results', {}).get(var, {})
+                measurements = data.get('results', {}).get(var, {}) # Získání hodnot pro danou proměnnou a jedno měření
                 if not measurements:
                     continue
 
-                temp = data.get('properties', {}).get("DCS", {}).get("AMAC_NTCy", {})
-                all_temps.append(temp)
-                mask.append(1 if temp > 0 else 0)
+                temp = data.get('properties', {}).get("DCS", {}).get("AMAC_NTCy", {}) # Získání teploty
+                all_temps.append(temp) 
                 file_date = data.get('date')
-                labels.append(file_date)
-                all_channels = []
+                test_dates.append(file_date)
+                all_channels = [] # Spojení všech kanálů z 6 čipů do jednoho seznamu
 
                 for chip in measurements:
                     all_channels.extend(chip)
@@ -428,11 +449,6 @@ def analyze_single(variables, folder_path_up, name, date_start, date_end, folder
                 means.append(mean_val)
                 errors.append(fit_err)
 
-                # n_channels = list(range(1, len(all_channels) + 1))
-                # ax1.plot(n_channels, all_channels, marker='.', linestyle='', markersize=5, color =colors[counter % len(colors)])
-                # ax1.plot(n_channels, y_fit, color =colors[counter % len(colors)])
-                
-                counter += 1
                 if plot_hist:
                     titlefiledate = file_date.replace(":","-")
                     print(titlefiledate)
@@ -440,33 +456,36 @@ def analyze_single(variables, folder_path_up, name, date_start, date_end, folder
                     histogram_with_peaks(all_channels,os.path.join(folder_path_down,"histograms"), threshold = threshold,
                                             mean=np.mean(all_channels), y_label=y_label, title = f"{title_short} hist, for {name} on {file_date}",filename=f"{var}_{name}_{titlefiledate[:-5]}")
                 failed, failed_groups, expected_value, fails = detect_failed_channels(all_channels, mean= mean_val,threshold=1.2)
-                
-                results[var] = {
-                    "means": means,
-                    "errors": errors,
-                    "failed_channels": failed,
-                    "failed_groups": failed_groups,
-                    "expected_value_fails": expected_value
-                }
-
-                if fails[0] and fails[1]:
-                    results["result"] =  "failed for 8 and more consecutive failed channels and for atleast one " \
-                    "channel noise larger that 1.5 times expected value"
-                elif fails[0]:
-                    results["result"] = "failed for 8 and more consecutive failed channels"
-                elif fails[1]:
-                    results["result"] = "failed for channel noise larger that 1.5 times expected value"
+                all_failed.append(failed)
+                all_failed_groups.append(failed_groups)
+                all_expected_value.append(expected_value)
+                all_fails.append(fails)
+                # failed --> list of failed channels
+                # failed_groups --> list of lists of consecutive failed channels
+                # expected_value --> list of channels failed expected value
+                # fails --> [bool for consecutive fails, bool for expected value fails]
+            
+            result_msg = []
+            for msg in all_fails:
+                if msg[0] and msg[1]:
+                    result_msg.append("failed for 8 and more consecutive failed channels and for atleast one " \
+                                        "channel noise larger that 1.5 times expected value")
+                elif msg[0]:
+                    result_msg.append("failed for 8 and more consecutive failed channels")
+                elif msg[1]:
+                    result_msg.append("failed for channel noise larger that 1.5 times expected value")
                 else:
-                    results["result"] = "Passed"
+                    result_msg.append("Passed")
+                
 
-            # ax1.set_title(f"{title} for {name} on {date_start}-{date_end}")
-            # ax1.set_xlabel("Channel Number")
-            # ax1.set_ylabel(y_label)
-            # ax1.grid(True)
-            # fig1.tight_layout(rect=[0, 0, 1, 0.95])
-            # fig1.savefig(os.path.join(folder_path_down, f"{var}_{name}_{file_date.replace(":","-")}.png"), dpi=300)
-            # output_file = os.path.join(folder_path_down, f"{var}_mean_fit_error_{name}_{date_start}-{date_end}.png")
-            # plot_summary(means, errors, mask, labels, y_label, title, title_short, output_file)
+            results[var] = {
+                "means": means,
+                "errors": errors,
+                "failed_channels": all_failed,
+                "failed_groups": all_failed_groups,
+                "expected_value_fails": all_expected_value,
+                "result":{d: m for d, m in zip(test_dates, result_msg)}
+            }
 
             plot_boxplot(all_tests, all_temps, os.path.join(folder_path_down,f"{var}_boxplot_{name}_{date_start}-{date_end}.png"),
                          result_name=name,
@@ -476,28 +495,32 @@ def analyze_single(variables, folder_path_up, name, date_start, date_end, folder
                              f"Failed channels marked with '////' hatch"
                          ),
                          yname=y_label,
-                         failed_indices=failed
-                         )
+                         failed_indices=failed)
+            
+            n_failed_channels = [len(all_failed[i]) for i in range(len(all_failed))]  # seznam počtu failnutych kanalu pro vsechny testy
+            plotfailed_per_test(n_failed_channels,n_tests=len(all_failed),n_channels = len(all_tests[0]),
+                                 output_file=os.path.join(folder_path_down,f"{var}_failed_channels_{name}_{date_start}-{date_end}.png"),
+                                 info_lines=(
+                                    f"name: {name}_{var}",
+                                    f"Threshold for failed channel: {threshold} x mean"))
+
+           
+            
         else:
             # per-chip vykreslování
             all_means = []
             all_errors = []
-            all_test_chips = []
+            all_test_chips = []  # Namerene hodnoty se ukladaji tak, ze se prvni ulozi hodnoty pro jeden chip z ruznych testu
+                                 # a pak se pokracuje na dalsi chip
             used_file_dates = []
-            """
-            # labels = [data.get('date') for data in data_list]
-            # fig1, axs1 = plt.subplots(2, 3, figsize=(15, 8))
-            # axs1 = axs1.ravel()
-            # fig2, axs2 = plt.subplots(2, 3, figsize=(18, 8))
-            # axs2 = axs2.ravel()
-            """
+            
             failed, failed_groups, expected_value, fails = [], [], [], []
             all_temps = []
             len_used_data = 0
 
-            for i in range(6):
+            for i in range(n_chips):
                 chip_means, chip_errors = [], []
-                for j, data in enumerate(sorted_list):
+                for data in sorted_list:
                     measurements = data.get('results', {}).get(var, {})
                     if not measurements:
                         continue
@@ -510,46 +533,29 @@ def analyze_single(variables, folder_path_up, name, date_start, date_end, folder
                     chip_values = measurements[i]
                    
                     all_test_chips.append(chip_values)
-                    # n_channels = list(range(1 + i * 128, i * 128 + len(chip_values) + 1))
-                    mean_val, fit_err, y_fit = analyze_channels(np.array(chip_values))
+                    
+                    mean_val, fit_err, _ = analyze_channels(np.array(chip_values))
                     chip_means.append(mean_val)
                     
                     chip_errors.append(fit_err)
                     all_means.append(mean_val)
                     all_errors.append(fit_err)
-                    failed_chip, failed_groups_chip, expected_value_chip, fails_chip = detect_failed_channels(chip_values, mean= mean_val)
+                    failed_chip, failed_groups_chip, expected_value_chip, fails_chip = detect_failed_channels(chip_values, mean= mean_val, threshold=1.2)
                     failed.append(failed_chip)
                     failed_groups.append(failed_groups_chip)
                     expected_value.append(expected_value_chip)
                     fails.append(fails_chip)
+
                     if plot_hist:
                         histogram_with_peaks(chip_values, os.path.join(folder_path_down,"histograms"), threshold, mean=np.mean(chip_values), y_label=y_label,
-                                                title = f"{title_short} hist,for {name} on {labels[j]}, chip {i + 1}", filename=f"{var}_{name}_{labels[j][:-5].replace(':','-')}_chip_{i+1}")
-                    # axs1[i].plot(n_channels, chip_values, marker='.', linestyle='', markersize=5, color = colors[j % 6])
-                    # axs1[i].plot(n_channels, y_fit, color = colors[j % 6])
-            #     axs1[i].set_title(f"Chip {i+1}")
-            #     axs1[i].set_xlabel("Channel Number")
-            #     axs1[i].set_ylabel(y_label)
-            #     axs1[i].grid(True)
-            #     x_pos = np.arange(len(chip_means))
-            #     axs2[i].errorbar(x_pos + 1, chip_means, yerr=chip_errors)
-            #     axs2[i].set_title(f"Chip {i+1}")
-            #     axs2[i].set_ylabel(y_label)
-            #     axs2[i].grid(True)
-            # fig1.suptitle(f"{title} for all chips, {date_start}-{date_end}", fontsize=16)
-            # fig2.suptitle(f"Mean values with fit errors, {title} for all chips, {date_start}-{date_end}", fontsize=16)
-            # fig1.tight_layout(rect=[0, 0, 1, 0.95])
-            # fig2.tight_layout(rect=[0, 0, 1, 0.95])
-            # fig1.savefig(os.path.join(folder_path_down, f"{var}_single_chips_{name}_{date_start}-{date_end}.png"))
-            # plt.close(fig1)
-            # fig2.savefig(os.path.join(folder_path_down, f"{var}_mean_fit_error_single_chips_{name}_{date_start}-{date_end}.png"))
-            # plt.close(fig2)
+                                                title = f"{title_short} hist,for {name} on {test_dates[j]}, chip {i + 1}", filename=f"{var}_{name}_{test_dates[j][:-5].replace(':','-')}_chip_{i+1}")
+            
             
             fig, axs = plt.subplots(2, 3, figsize=(18, 10))
             axs = axs.ravel() 
+            n_tests = len_used_data//6
 
-            for i in range(6):
-                n_tests = len_used_data // 6
+            for i in range(n_chips):
                 chip_data = all_test_chips[i*n_tests:(i+1)*n_tests]
                 failed_chip = failed[i*n_tests:(i+1)*n_tests]
 
@@ -557,46 +563,52 @@ def analyze_single(variables, folder_path_up, name, date_start, date_end, folder
                     axs[i],
                     data=chip_data,
                     temps=all_temps,
-                    result_name=f"{i+1}",
-                    info_lines=(
-                        f"name: {name}, chip: {i+1}",
-                        f"Threshold for failed channel: {threshold} x mean",
-                        f"Failed channels marked with '////' hatch"
-                    ),
                     yname=y_label,
-                    failed_indices = failed_chip
-                )
+                    failed_indices = failed_chip)
 
             fig.suptitle(f"Long Term Test: {name}", fontsize=16)
             fig.tight_layout(rect=[0, 0, 1, 0.96])
             fig.savefig(os.path.join(folder_path_down,f"{var}_boxplot_{name}_{date_start}-{date_end}_allchips.png"),dpi=300)
             plt.close(fig)
 
+            n_failed_channels = []
             
-            results[var] = {f"Chip_{i+1}": {"means": all_means[i::6], "errors": all_errors[i::6], "failed_channels": failed[i::6],
-                            "failed_groups": failed_groups[i::6], "expected_value_fails": expected_value[i::6]}for i in range(6)}
+            for i in range(n_tests):
+                counter = 0
+                for j in range(n_chips):
+                    counter += len(failed[i + j*n_tests])
+                n_failed_channels.append(counter)
             
-            results[var]["result"] = {f"chip_{i+1}": {} for i in range(6)}
-            results[var]["used_file_dates"] = used_file_dates
+            plotfailed_per_test(n_failed_channels,n_tests, len(all_test_chips[0])*n_chips,
+                                os.path.join(folder_path_down,f"{var}_failed_channels_{name}_{date_start}-{date_end}_allchips.png"),
+                                info_lines=(
+                                    f"name: {name}_{var}",
+                                    f"Threshold for failed channel: {threshold} x mean"))
             
 
-            for i in range(6):
-                chip_key = f"chip_{i+1}"
+            
 
-                fail_consecutive = fails[i][0]
-                fail_noise = fails[i][1]
-
-                if fail_consecutive and fail_noise:
-                    results[var]["result"][chip_key] = (
-                        "failed for 8 and more consecutive failed channels "
-                        "and for at least one channel noise larger than 1.5 times expected value"
-                    )
-                elif fail_consecutive:
-                    results[var]["result"][chip_key] = "failed for 8 and more consecutive failed channels"
-                elif fail_noise:
-                    results[var]["result"][chip_key] = "failed for channel noise larger than 1.5 times expected value"
+            results[var] = {f"Chip_{i+1}": {"means": all_means[i*n_tests:(i+1)*n_tests], "errors": all_errors[i*n_tests:(i+1)*n_tests], "failed_channels": failed[i*n_tests:(i+1)*n_tests],
+                        "failed_groups": failed_groups[i*n_tests:(i+1)*n_tests], "expected_value_fails": expected_value[i*n_tests:(i+1)*n_tests]}for i in range(6)}
+        
+            results[var]["result"] = {}
+            result_msg = []
+            for msg in fails:
+                if msg[0] and msg[1]:
+                    result_msg.append("failed for 8 and more consecutive failed channels and for atleast one " \
+                                        "channel noise larger that 1.5 times expected value")
+                elif msg[0]:
+                    result_msg.append("failed for 8 and more consecutive failed channels")
+                elif msg[1]:
+                    result_msg.append("failed for channel noise larger that 1.5 times expected value")
                 else:
-                    results[var]["result"][chip_key] = "Passed"
+                    result_msg.append("Passed")
+            
+            for i in range(n_chips):
+                results[var]["result"][f"chip{i+1}"] = {d: m for d, m in zip(used_file_dates, result_msg[i*n_tests:(i+1)*n_tests])}
+            
+
+           
 
     output_file = os.path.join(folder_path_down, f"{name}_{date_start}-{date_end}_results.json")
     save_results_to_json(results, output_file)
@@ -654,7 +666,7 @@ if __name__ == "__main__":
         folder_path_down = r"C:/sfg/Code/Graphs",
         component="20USEH40000148",
         date_start="2025-07-02",
-        date_end="2025-07-02",
+        date_end="2025-07-03",
         per_chip=True,
         plot_hist = False,
         under = True,
